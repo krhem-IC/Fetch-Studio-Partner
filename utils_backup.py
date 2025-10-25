@@ -51,9 +51,8 @@ def load_uploaded_image(file_obj):
 
 def remove_background(img):
     """
-    Remove backgrounds using AI with optimized settings for speed and quality.
-    Handles both white backgrounds and complex backgrounds effectively.
-    Preserves thin details like straws, ribbons, and small accessories.
+    Remove white/light backgrounds from product images using simple color thresholding.
+    Much faster than AI removal and preserves product packaging better.
     
     Args:
         img: PIL Image in RGB mode
@@ -62,109 +61,38 @@ def remove_background(img):
         PIL.Image: Image with transparent background (RGBA mode)
     """
     try:
-        # Resize large images to speed up processing
-        max_dimension = 2000
-        original_size = img.size
-        
-        if max(img.size) > max_dimension:
-            ratio = max_dimension / max(img.size)
-            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
-            img = img.resize(new_size, Image.Resampling.LANCZOS)
-            print(f"  ↓ Resized image to {new_size} for faster processing")
-        
-        # Convert to RGB if needed
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # Check if it's primarily a white background (simple case)
-        # Sample corners to detect white background
-        corners = [
-            img.getpixel((0, 0)),
-            img.getpixel((img.width-1, 0)),
-            img.getpixel((0, img.height-1)),
-            img.getpixel((img.width-1, img.height-1))
-        ]
-        
-        # If all corners are very light (likely white background)
-        is_white_bg = all(all(c > 240 for c in pixel) for pixel in corners)
-        
-        if is_white_bg:
-            # Use simple white background removal to preserve thin details
-            print(f"  📋 Detected white background - using detail-preserving removal")
-            img_rgba = img.convert('RGBA')
-            data = img_rgba.getdata()
-            
-            new_data = []
-            for item in data:
-                # Make ONLY pure white/near-white pixels transparent
-                # Very strict threshold to preserve white text/logos on products
-                if item[0] > 248 and item[1] > 248 and item[2] > 248:
-                    # Very light - likely background
-                    new_data.append((255, 255, 255, 0))
-                else:
-                    # Keep original pixel (including off-white text/labels)
-                    new_data.append(item)
-            
-            img_rgba.putdata(new_data)
-            img_no_bg = img_rgba
-        else:
-            # Use AI removal for complex backgrounds
-            print(f"  🤖 Using AI background removal")
-            
-            # Use AI but be more conservative to preserve text/logos
-            img_no_bg = rembg_remove(
-                img,
-                post_process_mask=True,  # Clean up mask edges
-                bgcolor=(0, 0, 0, 0)  # Transparent background
-            )
-        
-        # Check if background was actually removed
-        if img_no_bg.mode == 'RGBA':
-            alpha = img_no_bg.split()[3]
-            bbox = alpha.getbbox()
-            
-            if bbox is None:
-                # All transparent - something went wrong, use original
-                print(f"  ⚠️  Background removal resulted in empty image, using original")
-                if original_size != img.size:
-                    img = img.resize(original_size, Image.Resampling.LANCZOS)
-                return img.convert('RGBA')
-            
-            # Check if we lost too much content (might have removed thin details)
-            alpha_pixels = list(alpha.getdata())
-            non_transparent = sum(1 for p in alpha_pixels if p > 10)
-            total_pixels = len(alpha_pixels)
-            content_ratio = non_transparent / total_pixels
-            
-            if content_ratio < 0.05:
-                # Less than 5% visible - probably lost important details
-                print(f"  ⚠️  Too much removed ({content_ratio:.1%} visible), retrying with white removal")
-                # Fallback to simple white removal
-                img_rgba = img.convert('RGBA')
-                data = img_rgba.getdata()
-                
-                new_data = []
-                for item in data:
-                    if item[0] > 235 and item[1] > 235 and item[2] > 235:
-                        new_data.append((255, 255, 255, 0))
-                    else:
-                        new_data.append(item)
-                
-                img_rgba.putdata(new_data)
-                img_no_bg = img_rgba
-        
-        # Resize back to original size if we downsized
-        if original_size != img.size and img_no_bg.size != original_size:
-            img_no_bg = img_no_bg.resize(original_size, Image.Resampling.LANCZOS)
-        
-        return img_no_bg
-        
-    except Exception as e:
-        print(f"  ⚠️  Background removal failed: {e}. Using original image.")
-        # Return original image with alpha channel
+        # Convert to RGBA
         if img.mode != 'RGBA':
             img = img.convert('RGBA')
+        
+        # Get pixel data
+        data = img.getdata()
+        
+        # Create new image with transparency
+        new_data = []
+        
+        # Define white/light background threshold
+        # Pixels brighter than this become transparent
+        threshold = 240
+        
+        for item in data:
+            r, g, b = item[0], item[1], item[2]
+            
+            # If pixel is very light (likely background), make it transparent
+            if r > threshold and g > threshold and b > threshold:
+                new_data.append((r, g, b, 0))  # Transparent
+            else:
+                # Keep the pixel as-is
+                new_data.append((r, g, b, 255))  # Opaque
+        
+        # Apply the new data
+        img.putdata(new_data)
+        
         return img
+        
+    except Exception as e:
+        print(f"⚠️  Background removal failed: {e}. Using original image.")
+        # Return original image with alpha channel
 
 
 def add_drop_shadow(img, offset=(10, 10), shadow_color=(0, 0, 0, 80), blur_radius=15):
@@ -234,7 +162,7 @@ def validate_aspect_ratio_preservation(original_img, resized_img, tolerance=0.01
     return deviation <= tolerance
 
 
-def create_composite_image(loaded_images, image_type, background_hex, product_callouts="", logo_option=None):
+def create_composite_image(loaded_images, image_type, background_hex, product_callouts=""):
     """
     Create a Fetch-style composite image with natural product arrangement.
     
@@ -260,7 +188,7 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
         image_type: Target image type (offer_tile, brand_hero, etc.)
         background_hex: Background color hex code
         product_callouts: Optional instructions for product arrangement (can be blank)
-        logo_option: For brand_logo type - "resize" or "add_white" (optional)
+        product_callouts: Instructions for product arrangement
     
     Returns:
         PIL.Image: Professional composite matching Fetch quality standards
@@ -285,58 +213,14 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
     # Create base canvas
     composite = Image.new("RGBA", (target_width, target_height), bg_color + (255,))
     
-    # Special handling for brand logos - check BEFORE background removal
-    if image_type == "brand_logo":
-        print("🎨 Processing brand logo...")
-        
-        # Get ORIGINAL image
-        original_logo_img, logo_filename = loaded_images[0]
-        
-        # Check logo option
-        if logo_option and "just resize" in logo_option.lower():
-            # Logo already has colored background - JUST RESIZE, no processing
-            print("  📐 Resizing logo with existing background (no alterations)")
-            
-            # Resize to exact Fetch specs: 400x400
-            logo_resized = original_logo_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-            
-            # Convert to RGB for output
-            if logo_resized.mode == 'RGBA':
-                final_composite = Image.new("RGB", (target_width, target_height), (255, 255, 255))
-                final_composite.paste(logo_resized, (0, 0), logo_resized)
-            else:
-                final_composite = logo_resized.convert('RGB')
-            
-            return final_composite
-    
-    # Step 1: Remove backgrounds from all products (skip for "just resize" logos)
+    # Step 1: Remove backgrounds from all products
     print("📸 Removing backgrounds from products...")
     products_rgba = []
     for i, (img, filename) in enumerate(loaded_images):
         print(f"  Processing {i+1}/{len(loaded_images)}: {filename}")
         try:
-            # Remove background - use LESS aggressive method for logos
-            if image_type == "brand_logo":
-                # For logos, be very conservative - only remove pure white
-                print(f"  🎨 Using conservative background removal for logo")
-                img_rgba = img.convert('RGBA')
-                data = img_rgba.getdata()
-                
-                new_data = []
-                for item in data:
-                    # Only remove PURE white (>250 on all channels)
-                    if item[0] > 250 and item[1] > 250 and item[2] > 250:
-                        new_data.append((255, 255, 255, 0))
-                    else:
-                        # Keep everything else including off-white text
-                        new_data.append(item)
-                
-                img_rgba.putdata(new_data)
-                img_no_bg = img_rgba
-            else:
-                # Standard background removal for products
-                img_no_bg = remove_background(img)
-            
+            # Remove background
+            img_no_bg = remove_background(img)
             products_rgba.append((img_no_bg, filename))
             print(f"  ✓ Completed {filename}")
         except Exception as e:
@@ -350,74 +234,6 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
         raise ValueError("No images could be processed")
     
     print(f"\n✅ Successfully processed {len(products_rgba)} products")
-    
-    # Continue logo handling for white/colored background options
-    if image_type == "brand_logo":
-        if logo_option and "white background" in logo_option.lower():
-            # Add white background to logo (transparent logo + white = colored background)
-            print("  ⬜ Adding white background to transparent logo")
-            
-            # Use background-removed version from products_rgba
-            logo_img, _ = products_rgba[0]
-            
-            # Create white canvas at exact size
-            white_canvas = Image.new('RGB', (target_width, target_height), (255, 255, 255))
-            
-            # Calculate logo size (leave some padding)
-            padding = 50
-            max_width = target_width - (padding * 2)
-            max_height = target_height - (padding * 2)
-            
-            logo_aspect = logo_img.width / logo_img.height
-            if logo_aspect > (max_width / max_height):
-                new_width = max_width
-                new_height = int(max_width / logo_aspect)
-            else:
-                new_height = max_height
-                new_width = int(max_height * logo_aspect)
-            
-            logo_resized = logo_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
-            # Center logo on white canvas
-            x = (target_width - new_width) // 2
-            y = (target_height - new_height) // 2
-            
-            white_canvas.paste(logo_resized, (x, y), logo_resized if logo_resized.mode == 'RGBA' else None)
-            
-            return white_canvas
-            
-        elif logo_option and "colored background" in logo_option.lower():
-            # Third option: colored background (use selected color)
-            print(f"  🎨 Adding {background_hex} background to logo")
-            
-            # Use background-removed version
-            logo_img, _ = products_rgba[0]
-            
-            # Create colored canvas
-            colored_canvas = Image.new('RGB', (target_width, target_height), bg_color)
-            
-            # Calculate logo size (leave some padding)
-            padding = 50
-            max_width = target_width - (padding * 2)
-            max_height = target_height - (padding * 2)
-            
-            logo_aspect = logo_img.width / logo_img.height
-            if logo_aspect > (max_width / max_height):
-                new_width = max_width
-                new_height = int(max_width / logo_aspect)
-            else:
-                new_height = max_height
-                new_width = int(max_height * logo_aspect)
-            
-            logo_resized = logo_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
-            # Center logo on colored canvas
-            x = (target_width - new_width) // 2
-            y = (target_height - new_height) // 2
-            
-            colored_canvas.paste(logo_resized, (x, y), logo_resized if logo_resized.mode == 'RGBA' else None)
-            
-            return colored_canvas
     
     # Parse callouts (works with blank, partial, or detailed instructions)
     callouts_lower = product_callouts.lower() if product_callouts else ""
@@ -618,45 +434,40 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
         composite.paste(img_with_shadow, (x, y), img_with_shadow)
     
     elif num_products == 2:
-        # TWO PRODUCTS: Tight side-by-side like Mr. Pibb reference
-        # Products almost touching, balanced, no cutoff
+        # TWO PRODUCTS: Tight, professional side-by-side
+        # Like your Mr. Pibb reference - products close together, balanced
         
         print("📐 Layout: 2-product tight side-by-side")
         
-        # Define safe zone to prevent cutoff (85% of canvas)
-        safe_width = int(target_width * 0.85)
-        safe_height = int(target_height * 0.85)
-        
-        # Process both products with conservative sizing to prevent cutoff
+        # Process both products with priority-based sizing
         products_with_priority = [(products_rgba[i], product_instructions[i], i) for i in range(2)]
         products_with_priority.sort(key=lambda x: x[1]['priority'], reverse=True)
         
         processed_products = []
         for idx, ((img_rgba, filename), instr, original_idx) in enumerate(products_with_priority):
-            # REDUCED sizing to prevent cutoff - much smaller than before
+            # Size based on priority and instructions
             if instr['priority'] >= 2 or instr['size'] == 'large':
-                scale = 0.58  # Featured (was 0.75)
+                scale = 0.55  # Featured product slightly larger
             elif instr['size'] == 'small':
-                scale = 0.45  # Small (was 0.58)
+                scale = 0.40
             else:
-                scale = 0.52  # Default medium (was 0.70)
+                scale = 0.50  # Equal sizing by default
             
             img_aspect = img_rgba.width / img_rgba.height
             
             # Calculate size preserving aspect ratio
-            max_height = int(safe_height * scale)  # Use safe_height
+            max_height = int(target_height * scale)
             new_height = max_height
             new_width = int(new_height * img_aspect)
             
-            # Ensure fits within safe zone width
-            max_width = int(safe_width * 0.48)
+            # Ensure it doesn't get too wide
+            max_width = int(target_width * 0.42)
             if new_width > max_width:
                 new_width = max_width
                 new_height = int(new_width / img_aspect)
             
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            # Standardized shadows for consistency
-            img_with_shadow = add_drop_shadow(img_resized, offset=(8, 8), blur_radius=12)
+            img_with_shadow = add_drop_shadow(img_resized, offset=(10, 10), blur_radius=15)
             
             processed_products.append({
                 'image': img_with_shadow,
@@ -664,16 +475,16 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
                 'original_idx': original_idx
             })
         
-        # MINIMAL gap - almost touching like Mott's reference
-        gap = int(target_width * 0.005)  # 0.5% gap - essentially touching
+        # Calculate tight spacing - products should be close, like in reference images
+        gap = int(target_width * 0.03)  # Only 3% gap between products (very tight!)
         
         img1 = processed_products[0]['image']
         img2 = processed_products[1]['image']
         
-        # Total width of both products plus minimal gap
+        # Total width of both products plus gap
         total_width = img1.width + gap + img2.width
         
-        # Center the pair as a tight unit
+        # Center the pair as a unit
         start_x = (target_width - total_width) // 2
         
         # Position products
@@ -684,44 +495,42 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             
             # Horizontal positioning - tight side by side
             if instr['position'] == 'center':
+                # Override: center this specific product
                 x = (target_width - img_with_shadow.width) // 2
             elif instr['position'] == 'left':
-                x = (target_width - safe_width) // 2 + safe_width // 6
+                x = target_width // 8
             elif instr['position'] == 'right':
-                x = target_width - (target_width - safe_width) // 2 - safe_width // 6 - img_with_shadow.width
+                x = target_width - img_with_shadow.width - target_width // 8
             else:
-                # Default: tight side-by-side within safe zone
+                # Default: tight side-by-side placement
                 if original_idx == 0:
                     x = start_x
                 else:
                     x = start_x + img1.width + gap
             
-            # Vertical centering within safe zone
+            # Vertical positioning - center by default
             if instr['position'] == 'top':
-                y = (target_height - safe_height) // 2 + safe_height // 8
+                y = target_height // 8
             elif instr['position'] == 'bottom':
-                y = target_height - (target_height - safe_height) // 2 - safe_height // 8 - img_with_shadow.height
+                y = target_height - img_with_shadow.height - target_height // 8
             else:
                 # Center vertically for clean, professional look
                 y = (target_height - img_with_shadow.height) // 2
             
             composite.paste(img_with_shadow, (x, y), img_with_shadow)
-            print(f"  Placed product {original_idx + 1} at ({x}, {y}), size {img_with_shadow.size}")
+            print(f"  Placed product {original_idx + 1} at ({x}, {y})")
     
     elif num_products == 3:
-        # THREE PRODUCTS: Tight cluster arrangement
-        # Professional arrangement like Gold Peak reference
+        # THREE PRODUCTS: Hero center with tight flankers
+        # Professional arrangement like reference images
         
-        print("📐 Layout: 3-product tight cluster")
+        print("📐 Layout: 3-product hero + flankers")
         
-        # Safe zone: 85% of canvas to prevent cutoff
-        safe_width = int(target_width * 0.85)
-        safe_height = int(target_height * 0.85)
-        
-        # Identify hero product (highest priority or middle)
+        # Identify which product should be hero based on priority
         products_with_data = [(products_rgba[i], product_instructions[i], i) for i in range(3)]
         products_with_data.sort(key=lambda x: x[1]['priority'], reverse=True)
         
+        # Highest priority is hero, or default to middle product
         hero_idx = products_with_data[0][2] if products_with_data[0][1]['priority'] > 1 else 1
         
         processed_products = []
@@ -729,29 +538,29 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             instr = product_instructions[i]
             is_hero = (i == hero_idx) or instr['position'] == 'center'
             
-            # Reduced sizes for tight cluster - hero larger, flankers smaller
+            # Hero is larger, flankers smaller
             if is_hero or instr['priority'] >= 2:
-                scale = 0.54  # Hero - moderate size
+                scale = 0.50  # Hero
             elif instr['size'] == 'large':
-                scale = 0.48
+                scale = 0.45
             elif instr['size'] == 'small':
-                scale = 0.35
+                scale = 0.28
             else:
-                scale = 0.42  # Flanker - smaller
+                scale = 0.35  # Flanker
             
             img_aspect = img_rgba.width / img_rgba.height
-            max_height = int(safe_height * scale)
+            max_height = int(target_height * scale)
             new_height = max_height
             new_width = int(new_height * img_aspect)
             
-            # Ensure not too wide within safe zone
-            max_width = int(safe_width * 0.38)
+            # Ensure not too wide
+            max_width = int(target_width * 0.38)
             if new_width > max_width:
                 new_width = max_width
                 new_height = int(new_width / img_aspect)
             
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            img_with_shadow = add_drop_shadow(img_resized, offset=(8, 8), blur_radius=12)
+            img_with_shadow = add_drop_shadow(img_resized, offset=(10, 10), blur_radius=15)
             
             processed_products.append({
                 'image': img_with_shadow,
@@ -760,8 +569,8 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
                 'index': i
             })
         
-        # MINIMAL gap - products almost touching like reference
-        gap = int(target_width * 0.005)  # 0.5% gap
+        # Position: Hero centered, flankers tight on sides
+        gap = int(target_width * 0.04)  # Tight 4% gap
         
         for prod in processed_products:
             img_with_shadow = prod['image']
@@ -769,61 +578,57 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             is_hero = prod['is_hero']
             i = prod['index']
             
-            # Specific position override with safe zone offsets
+            # Specific position override
             if instr['position'] == 'left':
-                x = (target_width - safe_width) // 2 + safe_width // 6
+                x = target_width // 6
                 y = (target_height - img_with_shadow.height) // 2
             elif instr['position'] == 'right':
-                x = target_width - (target_width - safe_width) // 2 - safe_width // 6 - img_with_shadow.width
+                x = target_width - img_with_shadow.width - target_width // 6
                 y = (target_height - img_with_shadow.height) // 2
             elif is_hero and instr['position'] not in ['left', 'right']:
                 # Hero: centered
                 x = (target_width - img_with_shadow.width) // 2
                 y = (target_height - img_with_shadow.height) // 2
             else:
-                # Flankers: tight to hero on left/right within safe zone
+                # Flankers: tight to hero on left/right
                 hero_prod = next(p for p in processed_products if p['is_hero'])
                 hero_width = hero_prod['image'].width
                 center_x = target_width // 2
                 
                 if i < hero_idx:
-                    # Left flanker - almost touching hero
+                    # Left flanker - tight to left of hero
                     x = center_x - hero_width // 2 - gap - img_with_shadow.width
                 else:
-                    # Right flanker - almost touching hero
+                    # Right flanker - tight to right of hero
                     x = center_x + hero_width // 2 + gap
                 
-                # Center vertically for clean look
-                y = (target_height - img_with_shadow.height) // 2
+                # Slight vertical offset for visual interest
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-15, 15)
             
             composite.paste(img_with_shadow, (x, y), img_with_shadow)
-            print(f"  Placed product {i + 1} ({'HERO' if is_hero else 'flanker'}) at ({x}, {y}), size {img_with_shadow.size}")
+            print(f"  Placed product {i + 1} ({'HERO' if is_hero else 'flanker'}) at ({x}, {y})")
     
     elif num_products == 4:
-        # FOUR PRODUCTS: Tight 2x2 grid
-        # Professional, balanced arrangement within safe zone
+        # FOUR PRODUCTS: Tight 2x2 grid OR quad cluster
+        # Professional, balanced arrangement
         
         print("📐 Layout: 4-product tight grid")
         
-        # Safe zone: 85% of canvas to prevent cutoff
-        safe_width = int(target_width * 0.85)
-        safe_height = int(target_height * 0.85)
-        
-        # Process all products with reduced sizes
+        # Process all products
         processed_products = []
         for i, (img_rgba, filename) in enumerate(products_rgba):
             instr = product_instructions[i]
             
-            # Reduced sizes for tight grid
+            # Size based on instructions, default to uniform
             if instr['priority'] >= 2 or instr['size'] == 'large':
-                scale = 0.38
+                scale = 0.42
             elif instr['size'] == 'small':
-                scale = 0.25
+                scale = 0.28
             else:
-                scale = 0.32  # Uniform default
+                scale = 0.36  # Uniform default
             
             img_aspect = img_rgba.width / img_rgba.height
-            max_size = int(min(safe_width, safe_height) * scale)
+            max_size = int(min(target_width, target_height) * scale)
             
             if img_aspect > 1:
                 new_width = max_size
@@ -833,7 +638,7 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
                 new_width = int(max_size * img_aspect)
             
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            img_with_shadow = add_drop_shadow(img_resized, offset=(8, 8), blur_radius=12)
+            img_with_shadow = add_drop_shadow(img_resized, offset=(10, 10), blur_radius=15)
             
             processed_products.append({
                 'image': img_with_shadow,
@@ -841,9 +646,9 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
                 'index': i
             })
         
-        # MINIMAL gaps - almost touching
-        gap_x = int(target_width * 0.005)   # 0.5% horizontal gap
-        gap_y = int(target_height * 0.005)  # 0.5% vertical gap
+        # Tight 2x2 grid with minimal gaps
+        gap_x = int(target_width * 0.04)   # 4% horizontal gap
+        gap_y = int(target_height * 0.04)  # 4% vertical gap
         
         # Calculate total width and height of grid
         row1_width = processed_products[0]['image'].width + gap_x + processed_products[1]['image'].width
@@ -854,7 +659,7 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
         col2_height = processed_products[1]['image'].height + gap_y + processed_products[3]['image'].height
         max_grid_height = max(col1_height, col2_height)
         
-        # Center the grid within canvas
+        # Center the grid
         grid_start_x = (target_width - max_grid_width) // 2
         grid_start_y = (target_height - max_grid_height) // 2
         
@@ -879,20 +684,13 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
                 x, y = positions[idx]
             
             composite.paste(img_with_shadow, (x, y), img_with_shadow)
-            print(f"  Placed product {idx + 1} at ({x}, {y}), size {img_with_shadow.size}")
             print(f"  Placed product {idx + 1} at ({x}, {y})")
     
     else:
-        # 5+ PRODUCTS: Tight clustered composition
-        # Intentional grouping like reference images with safe zones
+        # 5+ PRODUCTS: Clustered composition with hero + supporting products
+        # Intentional grouping like reference images
         
-        print(f"📐 Layout: {num_products}-product tight cluster")
-        
-        # Safe zone: 85% of canvas to prevent cutoff
-        safe_width = int(target_width * 0.85)
-        safe_height = int(target_height * 0.85)
-        safe_x = (target_width - safe_width) // 2
-        safe_y = (target_height - safe_height) // 2
+        print(f"📐 Layout: {num_products}-product clustered composition")
         
         # Identify hero products based on priority
         products_with_data = [(products_rgba[i], product_instructions[i], i) for i in range(len(products_rgba))]
@@ -908,19 +706,19 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
         
         placed_rects = []
         
-        # Place hero products first (larger, centered within safe zone)
+        # Place hero products first (larger, centered)
         for idx in hero_indices[:2]:
             img_rgba, filename = products_rgba[idx]
             instr = product_instructions[idx]
             
-            # Reduced hero size for tighter cluster
+            # Hero size
             if instr['size'] == 'large':
-                scale = 0.40
+                scale = 0.48
             else:
-                scale = 0.35
+                scale = 0.42
             
             img_aspect = img_rgba.width / img_rgba.height
-            max_size = int(min(safe_width, safe_height) * scale)
+            max_size = int(min(target_width, target_height) * scale)
             
             if img_aspect > 1:
                 new_width = max_size
@@ -930,43 +728,43 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
                 new_width = int(max_size * img_aspect)
             
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            img_with_shadow = add_drop_shadow(img_resized, offset=(8, 8), blur_radius=12)
+            img_with_shadow = add_drop_shadow(img_resized, offset=(12, 12), blur_radius=16)
             
-            # Position hero centrally within safe zone
+            # Position hero centrally
             if instr['position'] == 'center' or instr['position'] == 'auto':
-                x = (target_width - img_with_shadow.width) // 2 + random.randint(-15, 15)
-                y = (target_height - img_with_shadow.height) // 2 + random.randint(-15, 15)
+                x = (target_width - img_with_shadow.width) // 2 + random.randint(-25, 25)
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-25, 25)
             elif instr['position'] == 'left':
-                x = safe_x + safe_width // 4 - img_with_shadow.width // 2
-                y = (target_height - img_with_shadow.height) // 2 + random.randint(-15, 15)
+                x = target_width // 4 - img_with_shadow.width // 2
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-25, 25)
             elif instr['position'] == 'right':
-                x = safe_x + 3 * safe_width // 4 - img_with_shadow.width // 2
-                y = (target_height - img_with_shadow.height) // 2 + random.randint(-15, 15)
+                x = 3 * target_width // 4 - img_with_shadow.width // 2
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-25, 25)
             else:
-                x = (target_width - img_with_shadow.width) // 2 + random.randint(-15, 15)
-                y = (target_height - img_with_shadow.height) // 2 + random.randint(-15, 15)
+                x = (target_width - img_with_shadow.width) // 2 + random.randint(-25, 25)
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-25, 25)
             
             composite.paste(img_with_shadow, (x, y), img_with_shadow)
             placed_rects.append((x, y, x + img_with_shadow.width, y + img_with_shadow.height))
-            print(f"  Placed HERO product {idx + 1} at ({x}, {y}), size {img_with_shadow.size}")
+            print(f"  Placed HERO product {idx + 1} at ({x}, {y})")
         
-        # Place supporting products tightly clustered around heroes
+        # Place supporting products clustered around heroes
         for idx, (img_rgba, filename) in enumerate(products_rgba):
             if idx in hero_indices[:2]:
                 continue
             
             instr = product_instructions[idx]
             
-            # Reduced supporting product size
+            # Supporting product size
             if instr['size'] == 'large':
-                scale = 0.27
+                scale = 0.32
             elif instr['size'] == 'small':
-                scale = 0.18
+                scale = 0.20
             else:
-                scale = 0.22
+                scale = 0.26
             
             img_aspect = img_rgba.width / img_rgba.height
-            max_size = int(min(safe_width, safe_height) * scale)
+            max_size = int(min(target_width, target_height) * scale)
             
             if img_aspect > 1:
                 new_width = max_size
@@ -978,25 +776,20 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
             img_with_shadow = add_drop_shadow(img_resized, offset=(8, 8), blur_radius=12)
             
-            # Find non-overlapping position tightly clustered near center within safe zone
+            # Find non-overlapping position clustered near center
             attempts = 0
             placed = False
             while attempts < 100 and not placed:
-                # Tight cluster around center - within safe zone only
-                cluster_x_min = safe_x + safe_width // 3
-                cluster_x_max = safe_x + 2 * safe_width // 3 - img_with_shadow.width
-                cluster_y_min = safe_y + safe_height // 3
-                cluster_y_max = safe_y + 2 * safe_height // 3 - img_with_shadow.height
-                
-                x = random.randint(cluster_x_min, max(cluster_x_min, cluster_x_max))
-                y = random.randint(cluster_y_min, max(cluster_y_min, cluster_y_max))
+                # Cluster around center - limited range for tight grouping
+                x = random.randint(target_width // 4, 3 * target_width // 4 - img_with_shadow.width)
+                y = random.randint(target_height // 4, 3 * target_height // 4 - img_with_shadow.height)
                 
                 new_rect = (x, y, x + img_with_shadow.width, y + img_with_shadow.height)
                 
-                # Check overlap with minimal tolerance (products very close)
+                # Check overlap with some tolerance (products can be close)
                 overlap = False
                 for rect in placed_rects:
-                    overlap_margin = 10  # Very tight clustering
+                    overlap_margin = 20  # Allow products to get close
                     if not (new_rect[2] < rect[0] - overlap_margin or 
                            new_rect[0] > rect[2] + overlap_margin or 
                            new_rect[3] < rect[1] - overlap_margin or 
@@ -1008,16 +801,16 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
                     composite.paste(img_with_shadow, (x, y), img_with_shadow)
                     placed_rects.append(new_rect)
                     placed = True
-                    print(f"  Placed supporting product {idx + 1} at ({x}, {y}), size {img_with_shadow.size}")
+                    print(f"  Placed supporting product {idx + 1} at ({x}, {y})")
                 
                 attempts += 1
             
             if not placed:
-                # Fallback: place within safe zone
-                fallback_x = random.randint(safe_x + 20, safe_x + safe_width - img_with_shadow.width - 20)
-                fallback_y = random.randint(safe_y + 20, safe_y + safe_height - img_with_shadow.height - 20)
-                composite.paste(img_with_shadow, (fallback_x, fallback_y), img_with_shadow)
-                print(f"  Placed supporting product {idx + 1} at ({fallback_x}, {fallback_y}), size {img_with_shadow.size} [fallback]")
+                # Fallback: place anyway in a safe spot
+                x = random.randint(50, target_width - img_with_shadow.width - 50)
+                y = random.randint(50, target_height - img_with_shadow.height - 50)
+                composite.paste(img_with_shadow, (x, y), img_with_shadow)
+                print(f"  Placed supporting product {idx + 1} at ({x}, {y}) [fallback]")
     
     # Convert back to RGB for final output
     final_composite = Image.new("RGB", (target_width, target_height), bg_color)
@@ -1104,32 +897,10 @@ def validate_image(img, preset_key, background_hex):
     report["mime"] = "image/png" if ext == "png" else "image/jpeg"
     return report
 
-def export_file(img, mime, image_type=None):
+def export_file(img, mime):
     buf = io.BytesIO()
-    
     if mime == "image/png":
-        # For logos, optimize to stay under 100KB
-        if image_type == "brand_logo":
-            # Try different compression levels to get under 100KB
-            for compress_level in range(6, 10):  # 6-9, higher = more compression
-                buf = io.BytesIO()
-                img.save(buf, format="PNG", optimize=True, compress_level=compress_level)
-                size_kb = len(buf.getvalue()) / 1024
-                
-                if size_kb < 100:
-                    print(f"  ✅ Logo optimized to {size_kb:.1f}KB (compress_level={compress_level})")
-                    return buf.getvalue()
-            
-            # If still too large, reduce quality further
-            print(f"  ⚠️ Logo still large, applying maximum compression...")
-            buf = io.BytesIO()
-            img.save(buf, format="PNG", optimize=True, compress_level=9)
-            size_kb = len(buf.getvalue()) / 1024
-            print(f"  📦 Final logo size: {size_kb:.1f}KB")
-            return buf.getvalue()
-        else:
-            img.save(buf, format="PNG")
+        img.save(buf, format="PNG")
     else:
         img.save(buf, format="JPEG", quality=92, optimize=True)
-    
     return buf.getvalue()

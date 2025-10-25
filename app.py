@@ -18,14 +18,46 @@ st.markdown("""
 
 st.markdown("---")
 
-# Main workflow
-st.header("📤 Upload Images")
+# STEP 1: Choose image type FIRST
+st.header("🎯 Step 1: Choose Image Type")
+image_type = st.selectbox(
+    "What type of image do you need?",
+    options=list(IMAGE_TYPES.keys()),
+    format_func=lambda x: IMAGE_TYPES[x]["label"],
+    help="Select the image type first - this determines upload limits and requirements"
+)
+
+# Show specs for selected type
+spec = IMAGE_TYPES[image_type]
+st.info(f"📐 **{spec['label']}**: {spec['size'][0]}×{spec['size'][1]} {spec['format'].upper()}")
+
+# Set max uploads based on image type
+if image_type in ["offer_tile", "offer_detail"]:
+    max_products = 7
+    st.caption(f"✅ You can upload up to {max_products} product images for {spec['label']}")
+elif image_type == "brand_hero":
+    max_products = 5
+    st.caption(f"✅ You can upload up to {max_products} images for {spec['label']}")
+else:  # brand_logo
+    max_products = 1
+    st.caption(f"ℹ️ {spec['label']} requires exactly 1 logo image")
+
+st.markdown("---")
+
+# STEP 2: Upload Images
+st.header(f"📤 Step 2: Upload Your Images")
 uploaded_files = st.file_uploader(
-    "Choose image files",
+    f"Choose image files (Max: {max_products})",
     type=['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp', 'heic', 'heif'],
     accept_multiple_files=True,
-    help="Upload one or more images - they will be combined into one final image"
+    help=f"Upload up to {max_products} images - they will be combined into one final {spec['label']}"
 )
+
+# Enforce max limit
+if uploaded_files and len(uploaded_files) > max_products:
+    st.error(f"❌ Too many files! Please upload maximum {max_products} images for {spec['label']}")
+    uploaded_files = uploaded_files[:max_products]
+    st.warning(f"⚠️ Only using the first {max_products} files")
 
 if uploaded_files:
     st.success(f"✅ {len(uploaded_files)} image(s) uploaded successfully!")
@@ -47,35 +79,93 @@ if uploaded_files:
                 st.error(f"Could not load {uploaded_file.name}: {str(e)}")
     
     if loaded_images:
-        st.header("📝 Project Information")
+        st.header("📝 Step 3: Project Details")
+        
+        # Special handling for brand logo - ask first
+        logo_option = None
+        if image_type == "brand_logo":
+            st.subheader("🎨 Brand Logo Options")
+            logo_option = st.radio(
+                "What does your logo need?",
+                [
+                    "Logo already has colored background - just resize",
+                    "Add white background to logo",
+                    "Add colored background to logo"
+                ],
+                help="Choose the right option for your logo: resize existing, add white, or add custom color"
+            )
         
         col1, col2 = st.columns(2)
         with col1:
             brand_name = st.text_input("Brand Name", placeholder="e.g., Target, Walmart")
             product_callouts = st.text_area(
-                "Product Organization & Call-outs", 
-                placeholder="e.g., Place cereal box in center, rotate coffee bag to show front label, arrange produce in foreground",
-                help="Describe how products should be positioned, rotated, or arranged in the final image"
+                "Product Organization & Call-outs (Optional)", 
+                placeholder="Leave blank for automatic professional layouts, or add specific instructions...\n\nExamples:\n• 'Put the 2 liter bottle in the middle'\n• 'Make the gift set large and centered'\n• 'First product on left, second in center'\n• 'Keep the multipack in the background'",
+                help="FLEXIBLE: Leave blank for smart defaults, or be as specific as you want!"
             )
             
-            # Example instructions
-            st.caption("💡 **Examples of what you can specify:**")
-            st.caption("• **Position**: 'center main product', 'place on left', 'arrange at bottom'")
-            st.caption("• **Size**: 'make cereal box large', 'keep snacks small'") 
-            st.caption("• **Rotation**: 'rotate coffee bag', 'turn label forward'")
-            st.caption("• **Featured items**: 'feature breakfast items', 'highlight main product'")
+            # Example instructions with flexibility emphasis
+            st.caption("✨ **This field is completely flexible:**")
+            st.caption("• 🎯 **Blank**: Professional default layouts (fast & clean)")
+            st.caption("• 📝 **Simple**: 'make it large', 'center it', 'on the left'")
+            st.caption("• 🎨 **Specific**: 'put the 2-liter in middle, others small'")
+            st.caption("• 🔧 **Detailed**: Full control over every product")
         
         with col2:
-            image_type = st.selectbox(
-                "Final Image Type",
-                options=list(IMAGE_TYPES.keys()),
-                format_func=lambda x: IMAGE_TYPES[x]["label"]
-            )
+            # Conditional background color based on logo option
+            if image_type == "brand_logo":
+                if logo_option and "just resize" in logo_option:
+                    # No color selection for resize-only
+                    background_color = "White #FFFFFF"  # Default, won't be used
+                    st.info("✅ Logo already has background - no color selection needed")
+                elif logo_option and "white background" in logo_option:
+                    # Fixed white for white background option
+                    background_color = "White #FFFFFF"
+                    st.info("⬜ Adding white background to logo")
+                else:
+                    # Show full color palette for colored background option
+                    st.markdown("🎨 **Choose Background Color:**")
+                    background_color = st.selectbox(
+                        "Background Color",
+                        options=[f"{p['name']} {p['hex']}" for p in APPROVED_SWATCHES] + 
+                                ["Red #FF0000", "Blue #0000FF", "Green #00FF00", 
+                                 "Yellow #FFFF00", "Orange #FFA500", "Purple #800080",
+                                 "Black #000000"],
+                        label_visibility="collapsed"
+                    )
+                    
+                    # Show color preview
+                    bg_hex = background_color.split()[-1]
+                    st.markdown(f"""
+                    <div style="background-color: {bg_hex}; padding: 20px; border-radius: 8px; text-align: center; margin-top: 10px;">
+                        <span style="color: {'#000000' if bg_hex in ['#FFFFFF', '#F9DC5C', '#FFFF00', '#FFA500'] else '#FFFFFF'}; font-weight: bold;">
+                            Background Preview
+                        </span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                # Non-logo image types
+                background_color = st.selectbox(
+                    "Background Color",
+                    options=[f"{p['name']} {p['hex']}" for p in APPROVED_SWATCHES]
+                )
+                
+                # Show color preview for relevant image types
+                if image_type in ["offer_tile", "offer_detail"]:
+                    bg_hex = background_color.split()[-1]
+                    st.markdown(f"""
+                    <div style="background-color: {bg_hex}; padding: 20px; border-radius: 8px; text-align: center; margin-top: 10px;">
+                        <span style="color: {'#000000' if bg_hex in ['#FFFFFF', '#F9DC5C'] else '#FFFFFF'}; font-weight: bold;">
+                            Background Preview
+                        </span>
+                    </div>
+                    """, unsafe_allow_html=True)
             
-            background_color = st.selectbox(
-                "Background Color",
-                options=[f"{p['name']} {p['hex']}" for p in APPROVED_SWATCHES]
-            )
+            st.write("")  # Spacing
+            st.info(f"📐 Creating: **{IMAGE_TYPES[image_type]['label']}**")
+            st.caption(f"Size: {IMAGE_TYPES[image_type]['size'][0]}×{IMAGE_TYPES[image_type]['size'][1]}")
+            st.caption(f"Format: {IMAGE_TYPES[image_type]['format'].upper()}")
+            st.caption(f"Images: {len(loaded_images)}/{max_products}")
         
         # Special handling for brand hero
         if image_type == "brand_hero":
@@ -130,7 +220,7 @@ if uploaded_files:
                 progress_bar.progress(25)
                 
                 # Create composite image from all uploaded images
-                final_image = create_composite_image(loaded_images, image_type, bg_hex, product_callouts)
+                final_image = create_composite_image(loaded_images, image_type, bg_hex, product_callouts, logo_option)
                 
                 status_text.text("Applying specifications...")
                 progress_bar.progress(50)
@@ -180,7 +270,7 @@ if uploaded_files:
                 st.subheader("📥 Download Your Image")
                 if passed_checks == total_checks:
                     filename = suggest_filename(image_type, bg_hex, f"{brand_name}_final" if brand_name else "final")
-                    data = export_file(final_image, report["mime"])
+                    data = export_file(final_image, report["mime"], image_type)
                     st.download_button(
                         f"📥 Download {filename}",
                         data=data,
@@ -188,11 +278,20 @@ if uploaded_files:
                         mime=report["mime"],
                         use_container_width=True
                     )
-                    st.success("Your image is ready for use! 🚀")
+                    
+                    # Show file size for logos
+                    if image_type == "brand_logo":
+                        size_kb = len(data) / 1024
+                        if size_kb < 100:
+                            st.success(f"Your logo is ready for use! 🚀 ({size_kb:.1f}KB)")
+                        else:
+                            st.warning(f"⚠️ Logo size: {size_kb:.1f}KB (target: <100KB)")
+                    else:
+                        st.success("Your image is ready for use! 🚀")
                 else:
                     st.info("💡 Some validation checks failed. The image has been created but may need adjustments before use.")
                     filename = suggest_filename(image_type, bg_hex, f"{brand_name}_draft" if brand_name else "draft")
-                    data = export_file(final_image, report["mime"])
+                    data = export_file(final_image, report["mime"], image_type)
                     st.download_button(
                         f"📥 Download Draft {filename}",
                         data=data,

@@ -261,13 +261,13 @@ def create_blank_image(image_type: str, background_color: str) -> Image.Image:
     width = spec["width"]
     height = spec["height"]
     
-    # Get RGB value for the color
-    rgb = FETCH_COLORS.get(background_color, (255, 255, 255))
+    # Get color value (RGB or RGBA tuple)
+    color_value = FETCH_COLORS.get(background_color, (255, 255, 255))
     
     # Create image
     if background_color == "Transparent":
         image = Image.new("RGBA", (width, height), (255, 255, 255, 0))
     else:
-        image = Image.new("RGB", (width, height), rgb)
+        image = Image.new("RGB", (width, height), color_value)
     
     return image

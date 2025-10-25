@@ -202,20 +202,103 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
     # Parse callouts
     callouts_lower = product_callouts.lower() if product_callouts else ""
     
+    # Enhanced callout parsing: match products to instructions
+    def parse_product_instructions(callouts, filename, index):
+        """Parse callouts to extract instructions for a specific product"""
+        instructions = {
+            'size': 'medium',  # small, medium, large
+            'position': 'auto',  # auto, center, left, right, top, bottom, front, back
+            'priority': 1  # higher = more prominent
+        }
+        
+        if not callouts:
+            return instructions
+        
+        callouts = callouts.lower()
+        filename_lower = filename.lower()
+        
+        # Try to find this product mentioned in callouts
+        # Look for common product keywords or parts of filename
+        filename_parts = filename_lower.replace('_', ' ').replace('-', ' ').replace('.jpg', '').replace('.png', '').replace('.jpeg', '').split()
+        
+        # Check if this product is mentioned
+        is_mentioned = False
+        mention_context = ""
+        
+        # Split callouts into sentences
+        sentences = callouts.replace(',', '.').split('.')
+        for sentence in sentences:
+            # Check if any filename part is in this sentence
+            if any(part in sentence and len(part) > 2 for part in filename_parts):
+                is_mentioned = True
+                mention_context = sentence
+                break
+        
+        # Also check for ordinal mentions (first image, second product, etc.)
+        ordinals = ['first', 'second', 'third', 'fourth', 'fifth']
+        if index < len(ordinals) and ordinals[index] in callouts:
+            is_mentioned = True
+            # Find the sentence with this ordinal
+            for sentence in sentences:
+                if ordinals[index] in sentence:
+                    mention_context = sentence
+                    break
+        
+        # If not specifically mentioned, check for generic instructions
+        if not is_mentioned:
+            mention_context = callouts
+        
+        # Parse size instructions
+        if any(word in mention_context for word in ['large', 'big', 'prominent', 'main', 'hero', 'feature']):
+            instructions['size'] = 'large'
+            instructions['priority'] = 3
+        elif any(word in mention_context for word in ['small', 'tiny', 'minor']):
+            instructions['size'] = 'small'
+            instructions['priority'] = 0
+        
+        # Parse position instructions
+        if any(word in mention_context for word in ['center', 'middle', 'centered']):
+            instructions['position'] = 'center'
+            instructions['priority'] = max(instructions['priority'], 2)
+        elif 'left' in mention_context:
+            instructions['position'] = 'left'
+        elif 'right' in mention_context:
+            instructions['position'] = 'right'
+        elif 'top' in mention_context or 'above' in mention_context:
+            instructions['position'] = 'top'
+        elif 'bottom' in mention_context or 'below' in mention_context:
+            instructions['position'] = 'bottom'
+        elif any(word in mention_context for word in ['front', 'foreground', 'forward']):
+            instructions['position'] = 'front'
+            instructions['priority'] = max(instructions['priority'], 2)
+        elif any(word in mention_context for word in ['back', 'background', 'behind']):
+            instructions['position'] = 'back'
+            instructions['priority'] = min(instructions['priority'], 0)
+        
+        return instructions
+    
+    # Parse instructions for all products
+    product_instructions = []
+    for idx, (img_rgba, filename) in enumerate(products_rgba):
+        instructions = parse_product_instructions(product_callouts, filename, idx)
+        product_instructions.append(instructions)
+        print(f"  📋 Product {idx+1} ({filename}): size={instructions['size']}, position={instructions['position']}, priority={instructions['priority']}")
+    
     # Step 2: Determine composition style based on count
     num_products = len(products_rgba)
     
     if num_products == 1:
         # SINGLE PRODUCT: Center-focused hero shot
         img_rgba, filename = products_rgba[0]
+        instr = product_instructions[0]
         
-        # Determine size based on callouts
-        if "large" in callouts_lower or "big" in callouts_lower:
+        # Determine size based on parsed instructions
+        if instr['size'] == 'large':
             scale = 0.75
-        elif "small" in callouts_lower:
-            scale = 0.5
+        elif instr['size'] == 'small':
+            scale = 0.45
         else:
-            scale = 0.65  # Default comfortable size
+            scale = 0.65  # Default medium size
         
         # Calculate dimensions maintaining aspect ratio
         img_aspect = img_rgba.width / img_rgba.height
@@ -234,60 +317,103 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
         # Add subtle shadow
         img_with_shadow = add_drop_shadow(img_resized, offset=(8, 8), blur_radius=12)
         
-        # Center position (or adjust based on callouts)
+        # Position based on parsed instructions
         x = (target_width - img_with_shadow.width) // 2
         y = (target_height - img_with_shadow.height) // 2
         
-        if "left" in callouts_lower:
+        if instr['position'] == 'left':
             x = target_width // 6
-        elif "right" in callouts_lower:
+        elif instr['position'] == 'right':
             x = target_width - img_with_shadow.width - target_width // 6
-        elif "top" in callouts_lower:
+        elif instr['position'] == 'top':
             y = target_height // 6
-        elif "bottom" in callouts_lower:
+        elif instr['position'] == 'bottom':
             y = target_height - img_with_shadow.height - target_height // 6
+        # 'center' and 'auto' stay centered (default)
         
         composite.paste(img_with_shadow, (x, y), img_with_shadow)
     
     elif num_products == 2:
-        # TWO PRODUCTS: Side-by-side showcase
-        for i, (img_rgba, filename) in enumerate(products_rgba):
-            # Slightly different sizes for visual interest
-            scale = 0.55 if i == 0 else 0.5
+        # TWO PRODUCTS: Side-by-side showcase with priority-based sizing
+        # Sort by priority to determine which gets more space
+        products_with_priority = [(products_rgba[i], product_instructions[i], i) for i in range(2)]
+        products_with_priority.sort(key=lambda x: x[1]['priority'], reverse=True)
+        
+        for idx, ((img_rgba, filename), instr, original_idx) in enumerate(products_with_priority):
+            # Size based on priority and instructions
+            if instr['priority'] >= 2:
+                scale = 0.6
+            elif instr['size'] == 'large':
+                scale = 0.58
+            elif instr['size'] == 'small':
+                scale = 0.42
+            else:
+                scale = 0.5
             
             img_aspect = img_rgba.width / img_rgba.height
             max_height = int(target_height * 0.7)
-            new_height = max_height
+            new_height = int(max_height * (scale / 0.5))
             new_width = int(new_height * img_aspect)
             
             # Adjust if too wide
-            if new_width > target_width * 0.4:
-                new_width = int(target_width * 0.4)
+            if new_width > target_width * 0.45:
+                new_width = int(target_width * 0.45)
                 new_height = int(new_width / img_aspect)
             
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
             img_with_shadow = add_drop_shadow(img_resized, offset=(6, 6), blur_radius=10)
             
-            # Position: left and right thirds
-            if i == 0:
-                x = target_width // 4 - img_with_shadow.width // 2
+            # Position: respect instructions, default to side-by-side
+            if instr['position'] == 'center':
+                x = (target_width - img_with_shadow.width) // 2
+            elif instr['position'] == 'left':
+                x = target_width // 6
+            elif instr['position'] == 'right':
+                x = target_width - img_with_shadow.width - target_width // 6
             else:
-                x = 3 * target_width // 4 - img_with_shadow.width // 2
+                # Default side-by-side based on original index
+                if original_idx == 0:
+                    x = target_width // 4 - img_with_shadow.width // 2
+                else:
+                    x = 3 * target_width // 4 - img_with_shadow.width // 2
             
-            y = (target_height - img_with_shadow.height) // 2
+            # Vertical positioning
+            if instr['position'] == 'top':
+                y = target_height // 6
+            elif instr['position'] == 'bottom':
+                y = target_height - img_with_shadow.height - target_height // 6
+            else:
+                y = (target_height - img_with_shadow.height) // 2
             
             composite.paste(img_with_shadow, (x, y), img_with_shadow)
     
     elif num_products == 3:
-        # THREE PRODUCTS: Featured center with flankers
+        # THREE PRODUCTS: Featured center with flankers, respecting instructions
+        # Identify which product should be centered based on priority
+        products_with_data = [(products_rgba[i], product_instructions[i], i) for i in range(3)]
+        products_with_data.sort(key=lambda x: x[1]['priority'], reverse=True)
+        
+        # Highest priority goes to center unless instructed otherwise
+        center_idx = products_with_data[0][2]
+        
         for i, (img_rgba, filename) in enumerate(products_rgba):
-            # Center product larger
-            if i == 1 or "center" in filename.lower() or "main" in filename.lower():
-                scale = 0.5
-                is_center = True
+            instr = product_instructions[i]
+            
+            # Determine if this is the center product
+            is_center = (i == center_idx) or instr['position'] == 'center'
+            
+            # Size based on role and instructions
+            if is_center or instr['priority'] >= 2:
+                if instr['size'] == 'large':
+                    scale = 0.6
+                else:
+                    scale = 0.5
+            elif instr['size'] == 'large':
+                scale = 0.48
+            elif instr['size'] == 'small':
+                scale = 0.32
             else:
                 scale = 0.4
-                is_center = False
             
             img_aspect = img_rgba.width / img_rgba.height
             max_height = int(target_height * scale)
@@ -297,21 +423,36 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
             img_with_shadow = add_drop_shadow(img_resized, offset=(6, 6), blur_radius=10)
             
-            # Position: center with flankers
-            if is_center:
+            # Position based on instructions
+            if is_center and instr['position'] != 'left' and instr['position'] != 'right':
                 x = (target_width - img_with_shadow.width) // 2
                 y = (target_height - img_with_shadow.height) // 2
-            elif i == 0:
+            elif instr['position'] == 'left' or (not is_center and i == 0):
                 x = target_width // 6 - img_with_shadow.width // 2
                 y = (target_height - img_with_shadow.height) // 2 + random.randint(-30, 30)
-            else:
+            elif instr['position'] == 'right' or (not is_center and i == 2):
                 x = 5 * target_width // 6 - img_with_shadow.width // 2
                 y = (target_height - img_with_shadow.height) // 2 + random.randint(-30, 30)
+            else:
+                # Fallback positioning
+                if i == center_idx:
+                    x = (target_width - img_with_shadow.width) // 2
+                    y = (target_height - img_with_shadow.height) // 2
+                elif i < center_idx:
+                    x = target_width // 6 - img_with_shadow.width // 2
+                    y = (target_height - img_with_shadow.height) // 2
+                else:
+                    x = 5 * target_width // 6 - img_with_shadow.width // 2
+                    y = (target_height - img_with_shadow.height) // 2
             
             composite.paste(img_with_shadow, (x, y), img_with_shadow)
     
     elif num_products == 4:
-        # FOUR PRODUCTS: Balanced quad layout
+        # FOUR PRODUCTS: Balanced quad layout respecting priority
+        products_with_data = [(products_rgba[i], product_instructions[i], i) for i in range(4)]
+        products_with_data.sort(key=lambda x: x[1]['priority'], reverse=True)
+        
+        # Default positions for 4 products
         positions = [
             (0.25, 0.3),  # Top-left
             (0.75, 0.3),  # Top-right
@@ -319,8 +460,16 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             (0.75, 0.7),  # Bottom-right
         ]
         
-        for i, (img_rgba, filename) in enumerate(products_rgba):
-            scale = random.uniform(0.35, 0.42)
+        for idx, (img_rgba, filename) in enumerate(products_rgba):
+            instr = product_instructions[idx]
+            
+            # Size based on priority
+            if instr['priority'] >= 2 or instr['size'] == 'large':
+                scale = 0.45
+            elif instr['size'] == 'small':
+                scale = 0.3
+            else:
+                scale = random.uniform(0.35, 0.42)
             
             img_aspect = img_rgba.width / img_rgba.height
             max_size = int(min(target_width, target_height) * scale)
@@ -335,27 +484,31 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
             img_with_shadow = add_drop_shadow(img_resized, offset=(5, 5), blur_radius=8)
             
-            # Position based on grid with slight randomness
-            base_x = int(positions[i][0] * target_width)
-            base_y = int(positions[i][1] * target_height)
-            
-            x = base_x - img_with_shadow.width // 2 + random.randint(-20, 20)
-            y = base_y - img_with_shadow.height // 2 + random.randint(-20, 20)
+            # Position: check for specific instructions first
+            if instr['position'] == 'center':
+                x = (target_width - img_with_shadow.width) // 2
+                y = (target_height - img_with_shadow.height) // 2
+            else:
+                # Use grid position with slight randomness
+                base_x = int(positions[idx][0] * target_width)
+                base_y = int(positions[idx][1] * target_height)
+                
+                x = base_x - img_with_shadow.width // 2 + random.randint(-20, 20)
+                y = base_y - img_with_shadow.height // 2 + random.randint(-20, 20)
             
             composite.paste(img_with_shadow, (x, y), img_with_shadow)
     
     else:
-        # 5+ PRODUCTS: Dynamic collage with featured items
-        # Identify featured products from callouts
-        featured_indices = []
-        if product_callouts:
-            for idx, (_, filename) in enumerate(products_rgba):
-                filename_lower = filename.lower()
-                if any(word in filename_lower for word in callouts_lower.split()) and \
-                   any(keyword in callouts_lower for keyword in ["center", "main", "feature", "hero"]):
-                    featured_indices.append(idx)
+        # 5+ PRODUCTS: Dynamic collage with priority-based featuring
+        # Identify featured products based on parsed priority
+        products_with_data = [(products_rgba[i], product_instructions[i], i) for i in range(len(products_rgba))]
+        products_with_data.sort(key=lambda x: x[1]['priority'], reverse=True)
         
-        # If no featured found, use first 1-2
+        # Top 1-2 priority products are featured
+        featured_indices = [products_with_data[i][2] for i in range(min(2, len(products_with_data))) 
+                           if products_with_data[i][1]['priority'] >= 2]
+        
+        # If no high priority, feature first 1-2
         if not featured_indices:
             featured_indices = [0] if num_products == 5 else [0, 1]
         
@@ -364,7 +517,13 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
         # Place featured products first (larger, centered)
         for idx in featured_indices[:2]:
             img_rgba, filename = products_rgba[idx]
-            scale = random.uniform(0.45, 0.55)
+            instr = product_instructions[idx]
+            
+            # Size based on instructions
+            if instr['size'] == 'large':
+                scale = random.uniform(0.5, 0.6)
+            else:
+                scale = random.uniform(0.45, 0.55)
             
             img_aspect = img_rgba.width / img_rgba.height
             max_size = int(min(target_width, target_height) * scale)
@@ -379,9 +538,19 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             img_resized = img_rgba.resize((new_width, new_height), Image.Resampling.LANCZOS)
             img_with_shadow = add_drop_shadow(img_resized, offset=(7, 7), blur_radius=10)
             
-            # Center with slight offset
-            x = (target_width - img_with_shadow.width) // 2 + random.randint(-40, 40)
-            y = (target_height - img_with_shadow.height) // 2 + random.randint(-40, 40)
+            # Position based on instructions
+            if instr['position'] == 'center' or instr['position'] == 'auto':
+                x = (target_width - img_with_shadow.width) // 2 + random.randint(-40, 40)
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-40, 40)
+            elif instr['position'] == 'left':
+                x = target_width // 4 - img_with_shadow.width // 2
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-40, 40)
+            elif instr['position'] == 'right':
+                x = 3 * target_width // 4 - img_with_shadow.width // 2
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-40, 40)
+            else:
+                x = (target_width - img_with_shadow.width) // 2 + random.randint(-40, 40)
+                y = (target_height - img_with_shadow.height) // 2 + random.randint(-40, 40)
             
             composite.paste(img_with_shadow, (x, y), img_with_shadow)
             placed_rects.append((x, y, x + img_with_shadow.width, y + img_with_shadow.height))
@@ -391,7 +560,15 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
             if idx in featured_indices[:2]:
                 continue
             
-            scale = random.uniform(0.25, 0.35)
+            instr = product_instructions[idx]
+            
+            # Size based on instructions and role
+            if instr['size'] == 'large':
+                scale = random.uniform(0.32, 0.4)
+            elif instr['size'] == 'small':
+                scale = random.uniform(0.18, 0.26)
+            else:
+                scale = random.uniform(0.25, 0.35)
             
             img_aspect = img_rgba.width / img_rgba.height
             max_size = int(min(target_width, target_height) * scale)
@@ -451,118 +628,6 @@ def create_composite_image(loaded_images, image_type, background_hex, product_ca
     
     return final_composite
 
-
-def generate_image_stub(preset_key):
-    
-    else:
-        # Many images: create a collage effect with callout consideration
-        import random
-        random.seed(42)  # Consistent layout
-        
-        # Parse for featured items
-        featured_items = []
-        regular_items = []
-        
-        if product_callouts:
-            callouts_words = callouts_lower.split()
-            for img, filename in loaded_images:
-                filename_lower = filename.lower()
-                is_featured = any(word in filename_lower and 
-                                ("center" in callouts_lower or "main" in callouts_lower or "feature" in callouts_lower)
-                                for word in callouts_words)
-                if is_featured:
-                    featured_items.append((img, filename))
-                else:
-                    regular_items.append((img, filename))
-        else:
-            regular_items = loaded_images
-        
-        # Place featured items first with STRICT aspect ratio preservation
-        placed_rects = []
-        
-        for img, filename in featured_items[:2]:  # Max 2 featured items
-            base_size = min(target_width, target_height) // 3  # Base size for featured
-            
-            # CRITICAL: Calculate exact dimensions preserving aspect ratio
-            img_aspect = img.width / img.height
-            if img_aspect > 1:
-                # Landscape image
-                new_width = base_size
-                new_height = int(base_size / img_aspect)
-            else:
-                # Portrait or square image
-                new_height = base_size
-                new_width = int(base_size * img_aspect)
-            
-            # Ensure dimensions are valid and within canvas
-            new_width = max(1, min(new_width, target_width))
-            new_height = max(1, min(new_height, target_height))
-            
-            # Resize preserving exact proportions
-            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
-            # Place in center area
-            x = (target_width - new_width) // 2
-            y = (target_height - new_height) // 2
-            
-            composite.paste(resized_img, (x, y))
-            placed_rects.append((x, y, x + new_width, y + new_height))
-        
-        # Place regular items around featured items with preserved proportions
-        max_img_size = min(target_width, target_height) // 5  # Smaller regular items
-        
-        for img, filename in regular_items[:6]:  # Limit regular items
-            attempts = 0
-            while attempts < 50:
-                base_size = random.randint(max_img_size // 2, max_img_size)
-                
-                # CRITICAL: Calculate exact dimensions preserving aspect ratio
-                img_aspect = img.width / img.height
-                if img_aspect > 1:
-                    # Landscape image
-                    new_width = base_size
-                    new_height = int(base_size / img_aspect)
-                else:
-                    # Portrait or square image
-                    new_height = base_size
-                    new_width = int(base_size * img_aspect)
-                
-                # Ensure dimensions are valid and within canvas
-                new_width = max(1, min(new_width, target_width))
-                new_height = max(1, min(new_height, target_height))
-                
-                # Skip if dimensions are too small to be meaningful
-                if new_width < 10 or new_height < 10:
-                    attempts += 1
-                    continue
-                
-                # Resize preserving exact proportions
-                resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                
-                x = random.randint(0, max(0, target_width - new_width))
-                y = random.randint(0, max(0, target_height - new_height))
-                
-                new_rect = (x, y, x + new_width, y + new_height)
-                
-                # Check for overlap
-                overlap = False
-                for rect in placed_rects:
-                    if not (new_rect[2] < rect[0] or new_rect[0] > rect[2] or 
-                           new_rect[3] < rect[1] or new_rect[1] > rect[3]):
-                        overlap = True
-                        break
-                
-                if not overlap:
-                    composite.paste(resized_img, (x, y))
-                    placed_rects.append(new_rect)
-                    break
-                
-                attempts += 1
-    
-    # FINAL STEP: Ensure composite meets exact Fetch specifications
-    final_composite = enforce_specs(composite, image_type)
-    
-    return final_composite
 
 def build_prompt(preset_key, brand, products, background_hex, lifestyle_keywords=""):
     if preset_key == "offer_tile":

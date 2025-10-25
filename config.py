@@ -13,6 +13,7 @@ FETCH_COLORS = {
     "White": (255, 255, 255),
     "Black": (0, 0, 0),
     "Light Gray": (240, 240, 240),
+    "Transparent": (255, 255, 255, 0),  # For transparent backgrounds
 }
 
 # Image specifications for each image type

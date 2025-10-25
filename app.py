@@ -62,6 +62,9 @@ def render_sidebar():
         # Color palette reference
         st.header("Fetch Color Palette")
         for color_name, rgb in FETCH_COLORS.items():
+            # Skip Transparent in the sidebar color palette display
+            if color_name == "Transparent":
+                continue
             st.markdown(
                 f'<div style="display: flex; align-items: center; margin-bottom: 0.5rem;">'
                 f'<div style="width: 30px; height: 30px; background-color: rgb({rgb[0]}, {rgb[1]}, {rgb[2]}); '

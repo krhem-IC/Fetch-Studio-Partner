@@ -217,13 +217,18 @@ def build_image_prompt(image_type: str, background_color: str, description: str)
     height = spec["height"]
     
     # Get RGB value for the color
-    rgb = FETCH_COLORS.get(background_color, (255, 255, 255))
+    color_info = FETCH_COLORS.get(background_color, (255, 255, 255))
+    # Handle both RGB and RGBA tuples
+    if len(color_info) == 4:
+        rgb_display = f"RGBA: {color_info}"
+    else:
+        rgb_display = f"RGB: {color_info}"
     
     prompt = f"""Create a {image_type.lower()} image for Fetch Rewards.
 
 Image specifications:
 - Size: {width}x{height} pixels
-- Background color: {background_color} (RGB: {rgb})
+- Background color: {background_color} ({rgb_display})
 - Style: Clean, professional, brand-compliant
 
 User description: {description}

@@ -1,58 +1,24 @@
-"""
-Configuration file for Fetch Studio Imagery app.
-Contains color palette, image specifications, and validation rules.
-"""
-
-# Fetch Brand Color Palette (RGB values)
-FETCH_COLORS = {
-    "Fetch Red": (255, 51, 68),
-    "Fetch Blue": (41, 98, 255),
-    "Fetch Green": (0, 209, 178),
-    "Fetch Yellow": (255, 197, 0),
-    "Fetch Purple": (138, 43, 226),
-    "White": (255, 255, 255),
-    "Black": (0, 0, 0),
-    "Light Gray": (240, 240, 240),
-    "Transparent": (255, 255, 255, 0),  # For transparent backgrounds
+# Image type specs from your guidelines
+IMAGE_TYPES = {
+    "offer_tile":   {"label": "Offer Tile",   "size": (1120, 1120), "format": "jpg",  "allow_lifestyle": False},
+    "offer_detail": {"label": "Offer Detail", "size": (1120, 1120), "format": "jpeg", "allow_lifestyle": True},
+    "brand_hero":   {"label": "Brand Hero",   "size": (1200, 857),  "format": "jpg",  "allow_lifestyle": True},
+    "brand_logo":   {"label": "Brand Logo",   "size": (400, 400),   "format": "png",  "circle_safe": True}
 }
 
-# Image specifications for each image type
-IMAGE_SPECS = {
-    "Offer Tile": {
-        "width": 800,
-        "height": 600,
-        "format": ["PNG", "JPEG"],
-        "max_file_size_mb": 2,
-        "allowed_backgrounds": list(FETCH_COLORS.keys()),
-    },
-    "Offer Detail": {
-        "width": 1200,
-        "height": 800,
-        "format": ["PNG", "JPEG"],
-        "max_file_size_mb": 3,
-        "allowed_backgrounds": list(FETCH_COLORS.keys()),
-    },
-    "Brand Hero": {
-        "width": 1920,
-        "height": 1080,
-        "format": ["PNG", "JPEG"],
-        "max_file_size_mb": 5,
-        "allowed_backgrounds": list(FETCH_COLORS.keys()),
-    },
-    "Brand Logo": {
-        "width": 512,
-        "height": 512,
-        "format": ["PNG"],
-        "max_file_size_mb": 1,
-        "allowed_backgrounds": ["White", "Transparent"],
-    },
-}
-
-# Validation rules
-VALIDATION_RULES = {
-    "no_text_overlays": True,
-    "no_gradients": True,
-    "no_watermarks": True,
-    "no_extra_logos": True,
-    "must_use_fetch_colors": True,
-}
+# Approved background palette
+APPROVED_SWATCHES = [
+    {"name":"Pink","hex":"#F7CAD0"},
+    {"name":"Orange","hex":"#FBB040"},
+    {"name":"Yellow","hex":"#FFF275"},
+    {"name":"Yellow-Green","hex":"#C4E86B"},
+    {"name":"Green","hex":"#7ED957"},
+    {"name":"Blue-Green","hex":"#74D4C0"},
+    {"name":"Blue","hex":"#72A1E5"},
+    {"name":"Purple","hex":"#A785E4"},
+    {"name":"Violet","hex":"#CFA9E9"},
+    {"name":"Cool Gray","hex":"#C3C7C8"},
+    {"name":"Warm Gray","hex":"#C6BBAE"},
+    {"name":"Beige","hex":"#E7D5B0"},
+]
+APPROVED_HEX = {c["hex"].upper() for c in APPROVED_SWATCHES}

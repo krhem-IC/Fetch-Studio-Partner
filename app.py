@@ -279,13 +279,14 @@ if uploaded_files:
                         use_container_width=True
                     )
                     
-                    # Show file size for logos
+                    # Show file size for logos with STRICT enforcement
                     if image_type == "brand_logo":
                         size_kb = len(data) / 1024
                         if size_kb < 100:
-                            st.success(f"Your logo is ready for use! 🚀 ({size_kb:.1f}KB)")
+                            st.success(f"✅ Your logo is ready for use! ({size_kb:.1f}KB / 100KB limit)")
                         else:
-                            st.warning(f"⚠️ Logo size: {size_kb:.1f}KB (target: <100KB)")
+                            st.error(f"❌ LOGO TOO LARGE: {size_kb:.1f}KB exceeds 100KB limit!")
+                            st.error("This logo cannot be used. Please simplify the design or use a different background color.")
                     else:
                         st.success("Your image is ready for use! 🚀")
                 else:

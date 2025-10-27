@@ -1108,10 +1108,10 @@ def export_file(img, mime, image_type=None):
     buf = io.BytesIO()
     
     if mime == "image/png":
-        # For logos, optimize to stay under 100KB
+        # For logos, STRICT <100KB enforcement
         if image_type == "brand_logo":
-            # Try different compression levels to get under 100KB
-            for compress_level in range(6, 10):  # 6-9, higher = more compression
+            # Try progressive compression levels
+            for compress_level in range(6, 10):
                 buf = io.BytesIO()
                 img.save(buf, format="PNG", optimize=True, compress_level=compress_level)
                 size_kb = len(buf.getvalue()) / 1024
@@ -1120,12 +1120,32 @@ def export_file(img, mime, image_type=None):
                     print(f"  ✅ Logo optimized to {size_kb:.1f}KB (compress_level={compress_level})")
                     return buf.getvalue()
             
-            # If still too large, reduce quality further
-            print(f"  ⚠️ Logo still large, applying maximum compression...")
+            # If still too large, convert to palette mode and reduce colors
+            print(f"  ⚠️ Logo still large, applying palette reduction...")
+            
+            # Try with 256 colors first
+            for num_colors in [256, 192, 128, 96, 64]:
+                buf = io.BytesIO()
+                # Convert to palette mode with specified colors
+                img_palette = img.convert('P', palette=Image.ADAPTIVE, colors=num_colors)
+                img_palette.save(buf, format="PNG", optimize=True, compress_level=9)
+                size_kb = len(buf.getvalue()) / 1024
+                
+                if size_kb < 100:
+                    print(f"  ✅ Logo optimized to {size_kb:.1f}KB ({num_colors} colors)")
+                    return buf.getvalue()
+            
+            # Final attempt: maximum compression with minimal colors
             buf = io.BytesIO()
-            img.save(buf, format="PNG", optimize=True, compress_level=9)
+            img_palette = img.convert('P', palette=Image.ADAPTIVE, colors=64)
+            img_palette.save(buf, format="PNG", optimize=True, compress_level=9)
             size_kb = len(buf.getvalue()) / 1024
-            print(f"  📦 Final logo size: {size_kb:.1f}KB")
+            
+            if size_kb >= 100:
+                print(f"  ❌ WARNING: Logo is {size_kb:.1f}KB - EXCEEDS 100KB LIMIT!")
+            else:
+                print(f"  ✅ Logo compressed to {size_kb:.1f}KB")
+            
             return buf.getvalue()
         else:
             img.save(buf, format="PNG")

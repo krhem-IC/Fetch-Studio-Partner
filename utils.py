@@ -1,7 +1,6 @@
 from PIL import Image, ImageStat, ImageOps, ImageFilter, ImageDraw
 import io
 import pytesseract
-import imghdr
 from config import IMAGE_TYPES, APPROVED_HEX
 from rembg import remove as rembg_remove
 

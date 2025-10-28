@@ -1042,9 +1042,18 @@ def build_prompt(preset_key, brand, products, background_hex, lifestyle_keywords
           "labels readable, realistic photography only, no added graphics or watermark."
         )
     if preset_key == "brand_hero":
+        # Build product description
+        product_text = f"featuring {', '.join(products)}" if products else "with optional product placement"
+        
+        # Build lifestyle scene description
+        scene_description = lifestyle_keywords if lifestyle_keywords else "warm, inviting lifestyle setting"
+        
         return (
-          f"Create a brand lifestyle image for {brand}. 1200x857 JPG. "
-          "Optional product inclusion, warm consistent lighting, realistic photography, no overlays."
+          f"Create a professional lifestyle brand hero image for {brand} {product_text}. "
+          f"Scene: {scene_description}. "
+          f"1200x857 landscape format, JPG. Professional product photography style, warm natural lighting, "
+          f"realistic photo aesthetic, authentic lifestyle context, complementary color palette with {background_hex} tones. "
+          "No text overlays, no added graphics, no watermarks. Photorealistic quality."
         )
     if preset_key == "brand_logo":
         return (

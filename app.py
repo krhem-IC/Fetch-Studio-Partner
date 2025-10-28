@@ -3,7 +3,7 @@ from PIL import Image
 from config import IMAGE_TYPES, APPROVED_SWATCHES
 from utils import load_uploaded_image, enforce_specs, validate_image, export_file, suggest_filename, build_prompt, create_composite_image
 
-st.set_page_config(page_title="Fetch Studio Partner", layout="wide")
+st.set_page_config(page_title="Fetch Studio Partner", page_icon="🎨", layout="wide")
 
 st.title("Fetch Studio Partner")
 st.caption("Professional image validation and processing for Fetch brand compliance")

@@ -1105,6 +1105,11 @@ def validate_image(img, preset_key, background_hex):
     return report
 
 def export_file(img, mime, image_type=None):
+    """
+    Export image with size limits:
+    - Brand Logo: STRICT <100KB
+    - All other images: STRICT <250KB
+    """
     buf = io.BytesIO()
     
     if mime == "image/png":
@@ -1148,8 +1153,30 @@ def export_file(img, mime, image_type=None):
             
             return buf.getvalue()
         else:
-            img.save(buf, format="PNG")
+            # Standard PNG with maximum compression
+            img.save(buf, format="PNG", optimize=True, compress_level=9)
     else:
-        img.save(buf, format="JPEG", quality=92, optimize=True)
+        # JPEG with 250KB limit enforcement
+        print(f"  📦 Optimizing JPEG to stay under 250KB...")
+        
+        # Start with high quality and progressively reduce if needed
+        for quality in range(92, 50, -5):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            size_kb = len(buf.getvalue()) / 1024
+            
+            if size_kb < 250:
+                print(f"  ✅ Image optimized to {size_kb:.1f}KB (quality={quality})")
+                return buf.getvalue()
+        
+        # Final attempt with lowest acceptable quality
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=50, optimize=True)
+        size_kb = len(buf.getvalue()) / 1024
+        
+        if size_kb >= 250:
+            print(f"  ❌ WARNING: Image is {size_kb:.1f}KB - EXCEEDS 250KB LIMIT!")
+        else:
+            print(f"  ✅ Image compressed to {size_kb:.1f}KB")
     
     return buf.getvalue()
